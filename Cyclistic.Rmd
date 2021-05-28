@@ -1,0 +1,199 @@
+---
+title: "Google Analytics Certification"
+subtitle: "Cyclistic"
+author: "Pavlos Mema"
+date: "28/3/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Overview
+
+Cyclistic, a share bike company in Chicago wants to understand how casual riders and annual members use Cyclistic bikes differently in order to convert the casual riders into annual members. For the purpose of our analysis data file with name "202103-divvy-tripdata" is been used. Data can be found [here](https://divvy-tripdata.s3.amazonaws.com/index.html)
+
+## Scenario
+
+You are a junior data analyst working in the marketing analyst team at Cyclistic, a bike-share company in Chicago. The director of
+marketing believes the company’s future success depends on maximizing the number of annual memberships. Therefore, your
+team wants to understand how casual riders and annual members use Cyclistic bikes differently. From these insights, your team
+will design a new marketing strategy to convert casual riders into annual members. But first, Cyclistic executives must approve
+your recommendations, so they must be backed up with compelling data insights and professional data visualizations.
+
+
+
+## Load the Libraries
+```{r message=FALSE}
+library(tidyverse)
+library(scales)
+library(lubridate)
+library(forcats)
+library(ggmap)
+```
+
+## Load the Data
+
+```{r message=FALSE, paged.print=FALSE}
+a<-read.csv("C:/Users/pavlos/Desktop/202103-divvy-tripdata.csv")
+```
+
+## Prepare the data
+
+```{r}
+str(a)
+a$started_at<-ymd_hms(a$started_at)
+a$ended_at<-ymd_hms(a$ended_at)
+c<- a%>%mutate(duration=as.numeric(difftime(ended_at,started_at,unit="mins")))%>%
+    mutate(start_days=as.factor(weekdays(started_at)))%>%
+    mutate(member_casual=as.factor(member_casual))
+
+```
+
+## Explore data
+
+Casual user represent the 37% of the total riders while the remaining 63% are members. 19.9% of the casual user prefer classic bikes while the 10 % prefer electric bikes. There is a 6.9% of the remaining percentage (37%) in which don't use the bike that often. On the other side the member shows that they use their bikes more constantly, 47% of the riders prefer classic bikes while the 16% prefer electric bikes.
+
+Note that we don't have riders_id which means that we don't know how a certain rider use bikes.
+
+```{r}
+c%>%
+  group_by(member_casual,rideable_type)%>%
+  summarize(count=n(),av_duration_time=mean(duration))%>%
+  mutate(perc=(count/228496))%>%
+  mutate(perc_total=sum(perc))%>%
+  mutate(perc=label_percent()(perc))%>%
+  mutate(perc_total=label_percent()(perc_total))
+```
+
+### Visual representation of the above findings.
+
+```{r message=FALSE, warning=FALSE}
+c%>%group_by(member_casual,rideable_type)%>%
+    summarize(count=n(),mean_duration=mean(duration))%>%
+    mutate(rideable_type=fct_reorder(rideable_type,desc(mean_duration)))%>%
+    mutate(mean_duration=round((mean_duration),2))%>%
+    mutate(time=paste(mean_duration,"min",sep=" "))%>%
+    ggplot(aes(x=rideable_type,y=mean_duration))+
+    geom_col(aes(fill=member_casual),position=position_dodge(1))+
+    labs(title="Mean ride duration by bike type and user", fill="user type")+
+    ylab("mean ride duration in min")+
+    xlab("bike type")+
+  geom_text(aes(group=member_casual,label = time), position=position_dodge(0.9),vjust=-0.5)+
+    theme_light()+
+    scale_fill_brewer(palette="Set1")
+
+```
+
+### Filter the data
+
+At this step we decide to filter the data and get rid of the docked bikes.
+Plot represent the 93.1% of total rides by user and bike type with average ride duration time less than 32 minutes.
+
+```{r message=FALSE, warning=FALSE}
+c%>%
+  group_by(member_casual,rideable_type)%>%
+  summarize(count=n(),.groups = "drop",av_duration_time=mean(duration))%>%
+  filter(av_duration_time<32)%>%
+  mutate(rideable_type=fct_reorder(rideable_type, desc(count)))%>%
+  mutate(av_duration_time=round(av_duration_time,2))%>%
+  mutate(time=paste(av_duration_time,"min",sep=" "))%>%
+  ggplot(aes(x=rideable_type, y=count))+
+  geom_col(aes(fill=member_casual),position=position_dodge(0.9), width = 0.8)+
+  scale_y_continuous(labels = comma,breaks=seq(0,120000,by=10000))+
+  geom_text(aes(group=member_casual,label =time), position=position_dodge(0.9),vjust=-0.2)+
+  labs(title="Number of rides by user & bike type",
+       subtitle="Data represent the 93.1% of total rides (unweighted) & duration time less that 32 minutes",  fill="user type")+
+  xlab("Bike type")+     
+  ylab("Nr. of rides")+
+  theme_light()+
+  scale_fill_brewer(palette="Set1")
+  
+```
+
+## Explore habits per weekday and user type
+
+```{r message=FALSE, warning=FALSE}
+c%>%select(-started_at,-ended_at)%>%na_if("")%>%na.omit()%>%
+  filter(rideable_type!="docked_bike")%>%
+  group_by(start_days,member_casual)%>%
+  summarize(count=n(),ave_duration=mean(duration))%>%
+  mutate(ave_duration=round(ave_duration,2))%>%
+  mutate(start_days=fct_relevel(start_days,
+  levels=c("Monday","Tuesday","Wednesday","Thursday",
+   "Friday","Saturday","Sunday")))%>%
+  ggplot(aes(start_days,count))+
+  geom_col(aes(fill=ave_duration))+
+  facet_wrap(~member_casual)+
+  scale_fill_gradient(low="light blue", high="red")+
+  theme_light()+
+  theme(axis.text.x=element_text(angle=90,hjust=1))+
+  labs(x="Days of Week", y="Nr. of rides",
+       title="Nr. of rides by days of week", fill="Average duration time")
+```
+
+
+## Explore most famous stations
+
+
+### Count the most famous stations with duration less than 1 hour
+
+```{r message=FALSE, warning=FALSE}
+c%>%select(-started_at,-ended_at)%>%na_if("")%>%na.omit()%>%
+  filter(rideable_type!="docked_bike")%>%
+  filter(duration<=60)%>%
+  group_by(start_station_name)%>%
+  summarize(count=n())%>%
+  arrange(desc(count))%>%
+  head()
+
+c%>%select(-started_at,-ended_at)%>%na_if("")%>%na.omit()%>%
+  filter(rideable_type!="docked_bike")%>%
+  filter(duration<=60)%>%
+  group_by(end_station_name)%>%
+  summarize(count=n())%>%
+  arrange(desc(count))%>%
+  head()
+```
+
+### Visualize the most famous stations with duration less than 1 hour and frequancy equal or greater than 1100 times by user type
+
+```{r message=FALSE, warning=FALSE}
+c%>%select(-started_at,-ended_at)%>%na_if("")%>%na.omit()%>%
+   filter(rideable_type!="docked_bike")%>%
+   filter(duration<=60)%>%
+    mutate(start_station_name=fct_infreq(fct_lump_min(start_station_name,1100)))%>%
+    mutate(end_station_name=fct_infreq(fct_lump_min(end_station_name,1100)))%>%
+    ggplot(aes(end_station_name,start_station_name))+
+    geom_tile(aes(fill=duration))+
+    scale_fill_gradient(low = "white", high = "light blue")+
+    facet_wrap(~member_casual)+
+    labs(title="Most famous station choosen by user type with frequancy equal or greater than 1100")+
+    theme_light()+
+    theme(axis.text.x=element_text(angle=90,hjust=1))
+```
+
+
+### Create a quick map of the most famous start station
+
+```{r message=FALSE, warning=FALSE}
+ d<-c%>%select(-started_at,-ended_at)%>%na_if("")%>%na.omit()%>%
+    filter(rideable_type!="docked_bike")%>%
+    mutate(start_station_name=fct_infreq(fct_lump_min(start_station_name,1100)))%>%
+    mutate(end_station_name=fct_infreq(fct_lump_min(end_station_name,1100)))%>%
+    group_by(start_station_name,end_station_name,member_casual)%>%
+    summarize(start_lat=mean(start_lat),start_lng=mean(start_lng),
+              end_lat=mean(end_lat),end_lng=mean(end_lng))
+
+    qmplot(start_lng, start_lat, xend = end_lng, yend = end_lat, zoom=14,
+       data =d, maptype = "toner-background")+
+    geom_point(aes(color=start_station_name,size=start_station_name))+
+    facet_wrap(~member_casual)+
+    labs(title="Most famous station by frequancy equal or greater than 1100")+
+    theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+      
+```
+
+
